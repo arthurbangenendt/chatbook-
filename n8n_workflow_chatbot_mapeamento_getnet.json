@@ -1,0 +1,168 @@
+{
+  "name": "Chatbot Mapeamento - Getnet",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chatbot-mapeamento",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.codigo_terminal, m.nome_estabelecimento, m.status, m.endereco, m.cidade, m.estado, m.responsavel, m.data_solicitacao, m.data_prevista, m.data_conclusao, m.observacoes, array_remove(array_agg(p.descricao) FILTER (WHERE p.status = 'aberta'), NULL) AS pendencias_abertas FROM mapeamentos m LEFT JOIN mapeamentos_pendencias p ON p.mapeamento_id = m.id GROUP BY m.id ORDER BY m.updated_at DESC LIMIT 50;",
+        "options": {}
+      },
+      "id": "buscar_contexto",
+      "name": "Buscar Contexto de Mapeamento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-980, 180],
+      "notesInFlow": true,
+      "notes": "Credencial Postgres: configure com o connection string do seu projeto Supabase (Project Settings > Database), usando a service_role/DB password.",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT role, content FROM chatbot_getnet_sessions WHERE session_id = $1 ORDER BY created_at ASC LIMIT 20;",
+        "options": {
+          "queryReplacement": "={{ [$('Webhook').item.json.body.sessionId] }}"
+        }
+      },
+      "id": "buscar_historico",
+      "name": "Buscar Historico da Sessao",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-980, 420],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookBody = $('Webhook').item.json.body;\nconst contextoRows = $('Buscar Contexto de Mapeamento').all().map(item => item.json);\nconst historicoRows = $('Buscar Historico da Sessao').all().map(item => item.json);\n\nconst contextoTexto = JSON.stringify(contextoRows, null, 2);\n\nconst systemPrompt = `Voce e o assistente de mapeamento do sistema da Getnet. Seu papel e ajudar usuarios internos a consultar e entender o status de mapeamento de terminais/equipamentos. Responda de forma direta e objetiva, em portugues. Use apenas os dados de contexto fornecidos abaixo - se nao souber algo, diga que nao tem essa informacao em vez de inventar.\\n\\nContexto de mapeamento disponivel para esta conversa:\\n${contextoTexto}`;\n\nconst historyMessages = historicoRows.map(row => ({\n  role: row.role,\n  content: row.content,\n}));\n\nconst messages = [\n  ...historyMessages,\n  { role: 'user', content: webhookBody.message },\n];\n\nreturn [{\n  json: {\n    sessionId: webhookBody.sessionId,\n    userId: webhookBody.userId,\n    userMessage: webhookBody.message,\n    anthropicBody: {\n      model: 'claude-sonnet-5',\n      max_tokens: 2048,\n      system: systemPrompt,\n      messages,\n    },\n  },\n}];\n"
+      },
+      "id": "montar_prompt",
+      "name": "Montar Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-760, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.anthropicBody) }}",
+        "options": {}
+      },
+      "id": "chamar_claude",
+      "name": "Chamar Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-540, 300],
+      "notesInFlow": true,
+      "notes": "Credencial 'Header Auth': Name = x-api-key, Value = sua Anthropic API key.",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeResponse = $input.first().json;\nconst prev = $('Montar Prompt').item.json;\n\nconst replyText = claudeResponse.content && claudeResponse.content[0]\n  ? claudeResponse.content[0].text\n  : 'Nao consegui gerar uma resposta agora.';\n\nreturn [{\n  json: {\n    sessionId: prev.sessionId,\n    userId: prev.userId,\n    userMessage: prev.userMessage,\n    reply: replyText,\n  },\n}];\n"
+      },
+      "id": "extrair_resposta",
+      "name": "Extrair Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-320, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO chatbot_getnet_sessions (session_id, user_id, role, content) VALUES ($1, $2, 'user', $3);",
+        "options": {
+          "queryReplacement": "={{ [$('Extrair Resposta').item.json.sessionId, $('Extrair Resposta').item.json.userId, $('Extrair Resposta').item.json.userMessage] }}"
+        }
+      },
+      "id": "salvar_msg_usuario",
+      "name": "Salvar Mensagem do Usuario",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-100, 200],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO chatbot_getnet_sessions (session_id, user_id, role, content) VALUES ($1, $2, 'assistant', $3);",
+        "options": {
+          "queryReplacement": "={{ [$('Extrair Resposta').item.json.sessionId, $('Extrair Resposta').item.json.userId, $('Extrair Resposta').item.json.reply] }}"
+        }
+      },
+      "id": "salvar_msg_assistente",
+      "name": "Salvar Resposta do Assistente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-100, 400],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { sessionId: $('Extrair Resposta').item.json.sessionId, reply: $('Extrair Resposta').item.json.reply } }}",
+        "options": {}
+      },
+      "id": "responder_webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [120, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Buscar Contexto de Mapeamento", "type": "main", "index": 0 },
+          { "node": "Buscar Historico da Sessao", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Buscar Contexto de Mapeamento": {
+      "main": [[{ "node": "Montar Prompt", "type": "main", "index": 0 }]]
+    },
+    "Buscar Historico da Sessao": {
+      "main": [[{ "node": "Montar Prompt", "type": "main", "index": 0 }]]
+    },
+    "Montar Prompt": {
+      "main": [[{ "node": "Chamar Claude", "type": "main", "index": 0 }]]
+    },
+    "Chamar Claude": {
+      "main": [[{ "node": "Extrair Resposta", "type": "main", "index": 0 }]]
+    },
+    "Extrair Resposta": {
+      "main": [[{ "node": "Salvar Mensagem do Usuario", "type": "main", "index": 0 }]]
+    },
+    "Salvar Mensagem do Usuario": {
+      "main": [[{ "node": "Salvar Resposta do Assistente", "type": "main", "index": 0 }]]
+    },
+    "Salvar Resposta do Assistente": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  }
+}

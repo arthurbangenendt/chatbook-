@@ -1,0 +1,12 @@
+{
+  "name": "mvp-chat-getnet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MVP de teste do chatbot de mapeamento (Getnet) - frontend estatico + backend fino que repassa pro webhook do n8n",
+  "scripts": {
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
