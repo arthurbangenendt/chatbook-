@@ -68,14 +68,36 @@ create index if not exists idx_chatbot_sessions_session_id_created_at
   on public.chatbot_getnet_sessions (session_id, created_at);
 
 -- ------------------------------------------------------------
+-- 2.1 Sessao do Direct Line (Copilot Studio)
+-- Guarda o token/conversationId da conversa do agente "Getnet Process Mapping Agent"
+-- por sessionId do MVP, para nao perder o contexto da conversa entre chamadas
+-- (o backend do MVP e serverless/stateless - ver mvp-chat-getnet/lib/chatHandler.js).
+-- ------------------------------------------------------------
+
+create table if not exists public.chatbot_getnet_directline_sessions (
+  session_id text primary key,
+  conversation_id text not null,
+  token text not null,
+  watermark text,
+  expires_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+
+create trigger trg_directline_sessions_updated_at
+before update on public.chatbot_getnet_directline_sessions
+for each row execute function public.set_updated_at();
+
+-- ------------------------------------------------------------
 -- 3. RLS
 -- Sem policies = so a service_role key acessa (bypassa RLS).
--- Configure o node Supabase do n8n com a service_role key, nao a anon key.
+-- O backend do MVP (mvp-chat-getnet) e qualquer node do n8n devem usar a
+-- service_role key, nunca a anon/publishable key.
 -- ------------------------------------------------------------
 
 alter table public.mapeamentos enable row level security;
 alter table public.mapeamentos_pendencias enable row level security;
 alter table public.chatbot_getnet_sessions enable row level security;
+alter table public.chatbot_getnet_directline_sessions enable row level security;
 
 -- ------------------------------------------------------------
 -- 4. Dado de exemplo para testar o fluxo antes de ter dados reais

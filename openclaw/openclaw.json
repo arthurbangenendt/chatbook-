@@ -1,0 +1,63 @@
+{
+  // Config do OpenClaw para o chatbot de mapeamento (Getnet) - solucao interina antes do
+  // Copilot Studio. Ver openclaw/README.md para como instalar e rodar isso.
+  //
+  // Modelo: NVIDIA NIM (endpoint OpenAI-compativel), nemotron-3.5-lightning-30b-a3b.
+  "models": {
+    "providers": {
+      "nvidia-nim": {
+        "baseUrl": "https://integrate.api.nvidia.com/v1",
+        "apiKey": "${NVIDIA_API_KEY}",
+        "api": "openai-completions",
+        "timeoutSeconds": 300,
+        "models": [
+          {
+            "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+            "name": "Nemotron 3.5 Lightning 30B A3B",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 1000000,
+            "maxTokens": 16384
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": { "primary": "nvidia-nim/nvidia/nemotron-3.5-lightning-30b-a3b" },
+      "models": {
+        "nvidia-nim/nvidia/nemotron-3.5-lightning-30b-a3b": { "alias": "Nemotron" }
+      }
+    }
+  },
+
+  // SEGURANCA: agente so conversa, sem execucao de shell/arquivos/Docker/browser.
+  // allowBundled vazio = modo whitelist, nada habilitado por padrao. As entradas abaixo sao
+  // redundantes de proposito (defesa em profundidade) caso allowBundled mude no futuro.
+  "skills": {
+    "allowBundled": [],
+    "entries": {
+      "shell-exec": { "enabled": false },
+      "filesystem": { "enabled": false },
+      "docker": { "enabled": false },
+      "browser-automation": { "enabled": false }
+    }
+  },
+
+  // Gateway HTTP (API OpenAI-compativel) usado pelo backend do MVP (mvp-chat-getnet).
+  // bind: "lan" (0.0.0.0) e necessario pra funcionar dentro de um container/host na nuvem
+  // (Render, etc.) - o padrao "loopback" so aceita conexao da propria maquina.
+  // TLS fica desligado aqui de proposito: em produção na Render, o TLS é terminado pela
+  // propria Render (https://*.onrender.com) e o trafego chega em HTTP simples pro container.
+  // Trocar OPENCLAW_GATEWAY_TOKEN por um valor forte antes de expor isso a producao.
+  "gateway": {
+    "port": 18789,
+    "bind": "lan",
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    }
+  }
+}

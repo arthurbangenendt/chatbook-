@@ -1,0 +1,18 @@
+# Blueprint da Render pro Gateway do OpenClaw (o unico pedaco que precisa de servidor
+# sempre-ligado - o mvp-chat-getnet continua na Vercel). Import em render.com/deploy ou
+# "New > Blueprint" no dashboard, apontando pra este repo.
+#
+# NVIDIA_API_KEY e OPENCLAW_GATEWAY_TOKEN ficam com sync:false de proposito - a Render pede
+# o valor na hora de criar o Blueprint e guarda como secret, nunca commitado aqui.
+services:
+  - name: openclaw-gateway-getnet
+    type: web
+    runtime: docker
+    dockerfilePath: ./openclaw/Dockerfile
+    dockerContext: ./openclaw
+    plan: 1c-2g
+    envVars:
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: OPENCLAW_GATEWAY_TOKEN
+        sync: false
